@@ -83,6 +83,30 @@ describe("Jev screening fixtures", () => {
     }
   });
 
+  test("the digest carries capped Executor reasoning", () => {
+    const ctx = asExtensionContext({
+      cwd: "/",
+      hasUI: false,
+      isProjectTrusted: () => false,
+      sessionManager: {
+        getBranch: () => [
+          {
+            message: {
+              content: [{ thinking: "t".repeat(10_000), type: "thinking" }],
+              role: "assistant",
+            },
+            type: "message",
+          },
+        ],
+      },
+    });
+    const digest = String(buildJevState(ctx).recent_conversation);
+    expect(digest.length).toBeLessThanOrEqual(4000);
+    expect(digest).toContain(
+      "[... 9000 earlier reasoning characters omitted ...]"
+    );
+  });
+
   test("question and draft are capped in the outbound state", () => {
     const ctx = asExtensionContext({
       cwd: "/",

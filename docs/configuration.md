@@ -108,6 +108,7 @@ Scout usage, latency, selection counts, pre-Scout omissions, and fallback reason
 
 - `contextMaxChars` defaults to `15000`. It preserves complete semantic entries and adds an omission marker rather than splitting a message.
 - Set `contextMaxChars` to `0` to omit reconstructed history. `9007199254740991` is the persisted value for `ALL`.
+- Executor reasoning is included in plain-text form and labelled as not shown to the user. Each turn keeps its most recent reasoning, up to a quarter of the history budget and at most 4,000 characters, with a marker stating how much earlier reasoning was omitted. Redacted or encrypted reasoning is never sent.
 - Tool results default to Pi's `2000` lines and `50 KiB` limits. Oversized results preserve their beginning and end with an omission marker.
 - `advisorLoopThreshold` is an integer of at least `2`; its default is `3`.
 - Omit `advisorMaxCallsPerSession` for an unlimited shared budget. Otherwise it must be a non-negative safe integer.

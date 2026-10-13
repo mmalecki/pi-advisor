@@ -27,6 +27,50 @@ const textFromPart = <Part>(part: Part): string => {
 export const textFrom = <Content>(content: Content): string =>
   contentParts(content).map(textFromPart).join("\n").trim();
 
+const REASONING_MAX_CHARS = 4000;
+
+export const reasoningBudget = (maxChars: number) =>
+  Math.min(REASONING_MAX_CHARS, Math.floor(maxChars / 4));
+
+const reasoningFrom = (content: RecordValue["content"]) =>
+  contentParts(content)
+    .map((part) =>
+      isRecordOf(part) &&
+      part.type === "thinking" &&
+      part.redacted !== true &&
+      isString(part.thinking)
+        ? part.thinking.trim()
+        : ""
+    )
+    .filter(Boolean)
+    .join("\n");
+
+const tailWithinChars = (value: string, maxChars: number) => {
+  const start = Math.max(0, value.length - maxChars);
+  const code = value.codePointAt(start) ?? 0;
+  return value.slice(code >= 0xdc_00 && code <= 0xdf_ff ? start + 1 : start);
+};
+
+const reasoningPart = (
+  reasoning: string,
+  maxChars: number,
+  redact: boolean
+) => {
+  const disclosed = redact ? redactSecrets(reasoning) : reasoning;
+  const kept = tailWithinChars(disclosed, maxChars);
+  const omitted = disclosed.length - kept.length;
+  return [
+    "[Reasoning] (not shown to the user):",
+    omitted > 0
+      ? `[... ${omitted} earlier reasoning characters omitted ...]`
+      : "",
+    kept,
+    "[End of reasoning]",
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
 const imageNotes = (content: RecordValue["content"], nonce: string) =>
   contentParts(content)
     .map((part) => (isRecordOf(part) ? imageMarker(part, nonce) : undefined))
@@ -35,9 +79,14 @@ const imageNotes = (content: RecordValue["content"], nonce: string) =>
 const assistantEntry = (
   message: RecordValue,
   policies: AdvisorToolPolicies,
-  redact: boolean
+  redact: boolean,
+  reasoningMaxChars: number
 ): string | undefined => {
   const parts: string[] = [];
+  const reasoning = reasoningFrom(message.content);
+  if (reasoning) {
+    parts.push(reasoningPart(reasoning, reasoningMaxChars, redact));
+  }
   const text = textFrom(message.content);
   if (text) {
     parts.push(redact ? redactSecrets(text) : text);
@@ -109,7 +158,8 @@ export const conversationEntry = <Entry>(
   policies: AdvisorToolPolicies,
   redact: boolean,
   describeImages = false,
-  imageNonce = ""
+  imageNonce = "",
+  reasoningMaxChars = REASONING_MAX_CHARS
 ): string | undefined => {
   if (!isRecordOf(entry)) {
     return;
@@ -129,7 +179,7 @@ export const conversationEntry = <Entry>(
     return text ? `User: ${redact ? redactSecrets(text) : text}` : undefined;
   }
   if (message.role === "assistant") {
-    return assistantEntry(message, policies, redact);
+    return assistantEntry(message, policies, redact, reasoningMaxChars);
   }
   if (message.role === "toolResult" || message.role === "tool") {
     return toolResultEntry(
@@ -214,7 +264,8 @@ export const recentConversation = (
         policies,
         redact,
         describeImages,
-        imageNonce
+        imageNonce,
+        reasoningBudget(maxChars)
       )
     )
     .filter((entry): entry is string => entry !== undefined);

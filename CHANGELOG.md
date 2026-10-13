@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+### Added
+
+- Included the Executor's plain-text reasoning in the conversation history sent to the Advisor, Advisor Scout, and Jev/Decisions screening, so reviews can see what a reasoning model was thinking and where it is stuck, not only what it said. Reasoning is labelled as not shown to the user, keeps the most recent part of each turn within its own cap (a quarter of the history budget, at most 4,000 characters), and follows the existing redaction and compaction rules. Redacted or encrypted reasoning is never sent.
+
 ## 0.13.1 - 2026-10-11
 
 ### Fixed

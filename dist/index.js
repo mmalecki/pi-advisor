@@ -2834,9 +2834,6 @@ var readProjectRules = async (ctx, maxBytes = PREFERENCES_MAX_BYTES, redact = tr
   };
 };
 
-// src/scout-groups.ts
-import { createHash as createHash2 } from "node:crypto";
-
 // src/tool-result-cap.ts
 var OMITTED_MARKER = "[... omitted tool-result section ...]";
 var collect = (candidates, maxEntries, maxContentBytes) => {
@@ -2914,9 +2911,34 @@ var textFromPart = (part) => {
 };
 var textFrom = (content) => contentParts(content).map(textFromPart).join(`
 `).trim();
+var REASONING_MAX_CHARS = 4000;
+var reasoningBudget = (maxChars) => Math.min(REASONING_MAX_CHARS, Math.floor(maxChars / 4));
+var reasoningFrom = (content) => contentParts(content).map((part) => isRecordOf(part) && part.type === "thinking" && part.redacted !== true && isString(part.thinking) ? part.thinking.trim() : "").filter(Boolean).join(`
+`);
+var tailWithinChars = (value, maxChars) => {
+  const start = Math.max(0, value.length - maxChars);
+  const code = value.codePointAt(start) ?? 0;
+  return value.slice(code >= 56320 && code <= 57343 ? start + 1 : start);
+};
+var reasoningPart = (reasoning, maxChars, redact) => {
+  const disclosed = redact ? redactSecrets(reasoning) : reasoning;
+  const kept = tailWithinChars(disclosed, maxChars);
+  const omitted = disclosed.length - kept.length;
+  return [
+    "[Reasoning] (not shown to the user):",
+    omitted > 0 ? `[... ${omitted} earlier reasoning characters omitted ...]` : "",
+    kept,
+    "[End of reasoning]"
+  ].filter(Boolean).join(`
+`);
+};
 var imageNotes = (content, nonce) => contentParts(content).map((part) => isRecordOf(part) ? imageMarker(part, nonce) : undefined).filter(isString);
-var assistantEntry = (message, policies, redact) => {
+var assistantEntry = (message, policies, redact, reasoningMaxChars) => {
   const parts = [];
+  const reasoning = reasoningFrom(message.content);
+  if (reasoning) {
+    parts.push(reasoningPart(reasoning, reasoningMaxChars, redact));
+  }
   const text = textFrom(message.content);
   if (text) {
     parts.push(redact ? redactSecrets(text) : text);
@@ -2960,7 +2982,7 @@ var toolResultEntry = (message, toolResultMaxLines, toolResultMaxBytes, policies
   return `[Tool Result for ${toolName}] (${message.isError ? "Error " : ""}output):
 ${capped.content}`;
 };
-var conversationEntry = (entry, toolResultMaxLines, toolResultMaxBytes, policies, redact, describeImages = false, imageNonce = "") => {
+var conversationEntry = (entry, toolResultMaxLines, toolResultMaxBytes, policies, redact, describeImages = false, imageNonce = "", reasoningMaxChars = REASONING_MAX_CHARS) => {
   if (!isRecordOf(entry)) {
     return;
   }
@@ -2978,7 +3000,7 @@ var conversationEntry = (entry, toolResultMaxLines, toolResultMaxBytes, policies
     return text ? `User: ${redact ? redactSecrets(text) : text}` : undefined;
   }
   if (message.role === "assistant") {
-    return assistantEntry(message, policies, redact);
+    return assistantEntry(message, policies, redact, reasoningMaxChars);
   }
   if (message.role === "toolResult" || message.role === "tool") {
     return toolResultEntry(message, toolResultMaxLines, toolResultMaxBytes, policies, redact, describeImages, imageNonce);
@@ -3023,9 +3045,12 @@ var recentConversation = (ctx, maxChars = 15000, toolResultMaxLines = advisorToo
   if (maxChars === 0) {
     return "";
   }
-  const entries = sessionContextEntries(ctx).map((entry) => conversationEntry(entry, toolResultMaxLines, toolResultMaxBytes, policies, redact, describeImages, imageNonce)).filter((entry) => entry !== undefined);
+  const entries = sessionContextEntries(ctx).map((entry) => conversationEntry(entry, toolResultMaxLines, toolResultMaxBytes, policies, redact, describeImages, imageNonce, reasoningBudget(maxChars))).filter((entry) => entry !== undefined);
   return selectRecentEntries(entries, maxChars);
 };
+
+// src/scout-groups.ts
+import { createHash as createHash2 } from "node:crypto";
 
 // src/scout-protocol.ts
 var invalid = (message) => ({
@@ -3153,7 +3178,7 @@ var pendingAdvisorArguments = (part) => {
   }
   return allowed;
 };
-var pendingInvocationDisclosure = (entry, invocationId, toolResultMaxLines, toolResultMaxBytes, policies, redact, imageNonce, disclosed) => {
+var pendingInvocationDisclosure = (entry, invocationId, toolResultMaxLines, toolResultMaxBytes, policies, redact, imageNonce, disclosed, reasoningMaxChars) => {
   if (!isRecord(entry.message)) {
     return disclosed;
   }
@@ -3164,7 +3189,7 @@ var pendingInvocationDisclosure = (entry, invocationId, toolResultMaxLines, tool
     }
     return { ...part, arguments: pendingAdvisorArguments(part) };
   });
-  return conversationEntry({ ...entry, message: { ...message, content } }, toolResultMaxLines, toolResultMaxBytes, policies, redact, true, imageNonce);
+  return conversationEntry({ ...entry, message: { ...message, content } }, toolResultMaxLines, toolResultMaxBytes, policies, redact, true, imageNonce, reasoningMaxChars);
 };
 var adjacentResultMismatch = (immediate, index, callIds, callOwners) => {
   if (immediate?.type === "message" && isRecord(immediate.message) && immediate.message.role === "toolResult" && isString(immediate.message.toolCallId) && !callIds.includes(immediate.message.toolCallId) && !callOwners.has(immediate.message.toolCallId)) {
@@ -3208,7 +3233,7 @@ var missingOutcome = (entry, index, entryId, disclosed, callIds, missing, result
       kind: "omitted"
     };
   }
-  const pendingDisclosed = pendingInvocationDisclosure(entry, currentInvocationId, caps.toolResultMaxLines, caps.toolResultMaxBytes, caps.policies, caps.redact, caps.imageNonce, disclosed);
+  const pendingDisclosed = pendingInvocationDisclosure(entry, currentInvocationId, caps.toolResultMaxLines, caps.toolResultMaxBytes, caps.policies, caps.redact, caps.imageNonce, disclosed, caps.reasoningMaxChars);
   return {
     group: createGroup(index, [entryId, ...resultEntryIds], "pending-invocation", [pendingDisclosed ?? disclosed, ...resultParts].join(`
 
@@ -3294,7 +3319,7 @@ var buildGroups = (entries, indexed, caps) => {
     if (!isRecord(entry)) {
       continue;
     }
-    const disclosed = conversationEntry(entry, caps.toolResultMaxLines, caps.toolResultMaxBytes, caps.policies, caps.redact, true, caps.imageNonce);
+    const disclosed = conversationEntry(entry, caps.toolResultMaxLines, caps.toolResultMaxBytes, caps.policies, caps.redact, true, caps.imageNonce, caps.reasoningMaxChars);
     if (!disclosed) {
       continue;
     }
@@ -3366,6 +3391,7 @@ var resolveCaps = (options) => ({
   maxGroups: options.maxGroups ?? SCOUT_MANIFEST_MAX_GROUPS,
   maxManifestBytes: options.maxManifestBytes ?? options.maxBytes ?? SCOUT_MANIFEST_MAX_BYTES,
   policies: options.policies ?? advisorToolPoliciesRef,
+  reasoningMaxChars: options.maxConversationChars === undefined ? undefined : reasoningBudget(options.maxConversationChars),
   redact: options.redact ?? advisorRedactSecretsRef,
   toolResultMaxBytes: options.toolResultMaxBytes ?? advisorToolResultMaxBytesRef,
   toolResultMaxLines: options.toolResultMaxLines ?? advisorToolResultMaxLinesRef

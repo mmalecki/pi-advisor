@@ -6,6 +6,7 @@ import {
   advisorToolResultMaxBytesRef,
   advisorToolResultMaxLinesRef,
 } from "./config/state.ts";
+import { reasoningBudget } from "./conversation.ts";
 import { buildGroups, groupWireBytes } from "./scout-groups.ts";
 import type { DisclosureCaps, GroupPass } from "./scout-groups.ts";
 import { indexToolCalls } from "./scout-protocol.ts";
@@ -47,6 +48,10 @@ const resolveCaps = (
   maxManifestBytes:
     options.maxManifestBytes ?? options.maxBytes ?? SCOUT_MANIFEST_MAX_BYTES,
   policies: options.policies ?? advisorToolPoliciesRef,
+  reasoningMaxChars:
+    options.maxConversationChars === undefined
+      ? undefined
+      : reasoningBudget(options.maxConversationChars),
   redact: options.redact ?? advisorRedactSecretsRef,
   toolResultMaxBytes:
     options.toolResultMaxBytes ?? advisorToolResultMaxBytesRef,

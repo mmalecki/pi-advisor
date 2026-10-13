@@ -103,7 +103,8 @@ const pendingInvocationDisclosure = (
   policies: AdvisorToolPolicies,
   redact: boolean,
   imageNonce: string,
-  disclosed: string
+  disclosed: string,
+  reasoningMaxChars: number | undefined
 ) => {
   if (!isRecord(entry.message)) {
     return disclosed;
@@ -127,7 +128,8 @@ const pendingInvocationDisclosure = (
     policies,
     redact,
     true,
-    imageNonce
+    imageNonce,
+    reasoningMaxChars
   );
 };
 
@@ -135,6 +137,7 @@ export interface DisclosureCaps {
   currentInvocationId?: string;
   imageNonce: string;
   policies: AdvisorToolPolicies;
+  reasoningMaxChars?: number;
   redact: boolean;
   toolResultMaxBytes: number;
   toolResultMaxLines: number;
@@ -243,7 +246,8 @@ const missingOutcome = (
     caps.policies,
     caps.redact,
     caps.imageNonce,
-    disclosed
+    disclosed,
+    caps.reasoningMaxChars
   );
   return {
     group: createGroup(
@@ -460,7 +464,8 @@ export const buildGroups = (
       caps.policies,
       caps.redact,
       true,
-      caps.imageNonce
+      caps.imageNonce,
+      caps.reasoningMaxChars
     );
     if (!disclosed) {
       continue;

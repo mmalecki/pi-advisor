@@ -1,6 +1,6 @@
 # Privacy and data handling
 
-Advisor context can contain user messages, tool calls, tool results, and repository information. Configure disclosure deliberately.
+Advisor context can contain user messages, Executor replies and reasoning, tool calls, tool results, and repository information. Configure disclosure deliberately.
 
 Redaction and output limits reduce accidental disclosure; they are not a data-classification system and cannot guarantee every secret is found. Use tool policies for content that must not be sent to the Advisor.
 
@@ -33,6 +33,12 @@ Redaction and output limits reduce accidental disclosure; they are not a data-cl
   - `exclude` omits both call details and output.
 - Tools not listed in `advisorToolPolicies`, including custom and newly added tools, use `full` for backward compatibility.
 
+## Executor reasoning
+
+Reconstructed history includes the Executor model's plain-text reasoning, labelled as not shown to the user. Each turn keeps only its most recent reasoning: up to a quarter of the history budget (`contextMaxChars` for the Advisor and Scout, `advisorJevDigestMaxChars` for Jev), and at most 4,000 characters. Reasoning that the provider redacted or encrypted, and provider signatures, are never sent.
+
+Reasoning is treated like the Executor's visible replies. Secret redaction, when enabled, runs before the cap, and reasoning in cleared or compacted-out entries is not forwarded. Tool policies do not filter it: a model can restate an excluded tool's output in its reasoning, just as it can in its replies.
+
 ## Codemode disclosure
 
 Pi Codemode calls the same registered `ask_advisor` tool, with the same screening, context reconstruction, redaction, repository ceilings, and attachment consent. Nested tool results are not stored as transcript entries; pi-advisor does not retrieve them from Codemode's local variables or nested-call metadata.
@@ -59,7 +65,7 @@ In a trusted project, `.pi/advisor-preferences.md` may provide a short local bri
 
 `advisorScoutEnabled` defaults to `false`. When enabled, Scout sends a bounded manifest of Advisor-eligible conversation and tool history to the configured Executor model and provider before every Advisor invocation.
 
-The same tool disclosure policies, tool-result limits, and optional secret redaction run before Scout sees historical content. Image content is represented by non-pixel markers for selection; image bytes never reach Scout. Advisor image pixels are bound to selected evidence groups, not to markers repeated in Scout's synthesis. Tool-call and result messages are grouped atomically. Incomplete historical fragments are omitted rather than sent as orphan evidence. Required current-request context cannot be partially truncated to force a Scout call.
+The same tool disclosure policies, tool-result limits, reasoning cap, and optional secret redaction run before Scout sees historical content. Image content is represented by non-pixel markers for selection; image bytes never reach Scout. Advisor image pixels are bound to selected evidence groups, not to markers repeated in Scout's synthesis. Tool-call and result messages are grouped atomically. Incomplete historical fragments are omitted rather than sent as orphan evidence. Required current-request context cannot be partially truncated to force a Scout call.
 
 Scout does not receive the deterministic Git context, Executor draft, project preferences, or explicitly attached tracked and untracked files. These regions bypass Scout and retain their existing disclosure, redaction, escaping, and cap rules when the final Advisor request is assembled.
 
@@ -79,7 +85,7 @@ When enabled, `~/.pi/agent/advisor-outcomes.jsonl` stores bounded, rotating JSON
 
 The optional consultation filter (`advisorJevFilterEnabled`) and proactive turn gate (`advisorJevTurnGateEveryTurns`) are off by default. `/advisor-settings` → **Jev provider** offers TypeSafe Jev, OpenRouter using the existing Pi login, OpenAI Decisions, or a user-supplied System One–compatible endpoint. Every one is live-verified before it is saved. `advisorJevTransport` remains `auto` by default and preserves its TypeSafe-key → OpenRouter order; OpenAI Decisions and the custom endpoint are opt-in and are never selected automatically.
 
-Every provider receives the same bounded Jev evidence: a `role` marker, the Executor's `question` and `draft` (each redacted and capped at 8 KiB when present), and a `recent_conversation` digest capped by `advisorJevDigestMaxChars` (default 4,000 characters). The digest uses the Advisor context pipeline, so tool disclosure policies, tool-result caps, and optional secret redaction apply, and older entries are dropped first. The proactive turn gate sends the digest alone. No Git context, file attachments, images, Scout output, or project preferences are sent to Jev/Decisions.
+Every provider receives the same bounded Jev evidence: a `role` marker, the Executor's `question` and `draft` (each redacted and capped at 8 KiB when present), and a `recent_conversation` digest capped by `advisorJevDigestMaxChars` (default 4,000 characters). The digest uses the Advisor context pipeline, including capped Executor reasoning, so tool disclosure policies, tool-result caps, and optional secret redaction apply, and older entries are dropped first. The proactive turn gate sends the digest alone. No Git context, file attachments, images, Scout output, or project preferences are sent to Jev/Decisions.
 
 TypeSafe and OpenRouter retain their existing named-question request. OpenAI Decisions serializes only this Jev state as text input and sends named predicate/score questions to `https://api.openai.com/v1/decisions`, using the fixed beta model `gpt-6-luna`. A System One–compatible endpoint receives the same request shape as TypeSafe, sent to the Base URL you configured with `/v1/systemone` appended. TypeSafe requests go to `api.typesafe.ai`; OpenRouter requests go to `openrouter.ai`. Only the selected provider receives screening evidence: `auto` never selects OpenAI or a custom endpoint, and explicit provider selection is live-verified before it is saved. pi-advisor composes the skip decision locally: both negligible stakes and self-answerability must pass their existing thresholds (`advisorJevFilterSkipConfidence` 0.85 and `advisorJevFilterNoulMargin` 0.35 by default). Those thresholds have not been empirically calibrated for Decisions, or for third-party implementations of the contract. Missing, refused, malformed, or uncertain answers and provider errors allow the consultation (fail-open). Nothing about screening activity is sent to Herdr; turn-gate _consultations_ are ordinary Advisor egress.
 

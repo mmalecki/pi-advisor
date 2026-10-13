@@ -424,6 +424,42 @@ describe("Scout context", () => {
     expect(pending?.content).not.toContain("scratch.txt");
   });
 
+  test("offers budget-capped plain reasoning to Scout, never redacted thinking", () => {
+    const built = buildScoutManifest(
+      context([
+        user("u1", "review this"),
+        assistant("a1", [
+          {
+            redacted: true,
+            thinking: "[Reasoning redacted]",
+            thinkingSignature: "encrypted-payload",
+            type: "thinking",
+          },
+          { thinking: "r".repeat(100_000), type: "thinking" },
+          {
+            arguments: {},
+            id: "advisor-call",
+            name: "ask_advisor",
+            type: "toolCall",
+          },
+        ]),
+      ]),
+      { currentInvocationId: "advisor-call", maxConversationChars: 8000 }
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) {
+      return;
+    }
+    const pending = built.manifest.groups.at(-1);
+    expect(pending?.kind).toBe("pending-invocation");
+    expect(pending?.content).toContain("[Reasoning] (not shown to the user):");
+    expect(pending?.content).toContain(
+      "[... 98000 earlier reasoning characters omitted ...]"
+    );
+    expect(pending?.content).not.toContain("encrypted-payload");
+    expect(pending?.content).not.toContain("[Reasoning redacted]");
+  });
+
   test("keeps manifest transport and Advisor conversation budgets separate", () => {
     const entries = [
       user("u1", "current request ".repeat(40)),
